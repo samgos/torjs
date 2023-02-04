@@ -28,8 +28,8 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 	if (torControlMessageHandler && typeof torControlMessageHandler != 'function') throw new TypeError('When defined, torControlMessageHandler must be a function');
 	if (keysFolder && typeof keysFolder != 'string') throw new TypeError('When defined, keysFolder must be a string');
 
-	var portNumber = (socksPortNumber || 9999).toString();
-	var controlPort = (controlPortNumber || 9998).toString();
+	var portNumber = (socksPortNumber || 9050).toString();
+	var controlPort = (controlPortNumber || 9999).toString();
 	var services = [];
 	var bridges = [];
 	var transports = [];
@@ -78,7 +78,7 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 			var hiddenServiceFolder = path.join(hiddenServicePath, services[i].name);
 			configFile += 'HiddenServiceDir ' + path.join(hiddenServicePath, services[i].name) + '\n';
 			for (var j = 0; j < services[i].ports.length; j++){
-				configFile += 'HiddenServicePort ' + services[i].ports[j] + '\n';
+				configFile += 'HiddenServicePort 443 127.0.0.1:' + services[i].ports[j] + '\n';
 			}
 		}
 		fs.writeFileSync(destPath, configFile);
@@ -162,12 +162,12 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 			}
 			for (var i = 0; i < bridgesConfig.length; i++){
 				if (bridgesConfig[i].address){
-					bridges.push({transport: bridgesConfig[i].transport, address: bridgesConfig[i].address, fingerprint: bridgesConfig[i].fingerprint});
+					bridges.push({transport: bridgesConfig[i].transport, address: bridgesConfig[i].address, fingerprint: bridgesConfig[i].fingerprint, cert: bridgesConfig[i].cert, iat: bridgesConfig[i].iat });
 				}
 			}
 			for (var i = 0; i < transportsConfig.length; i++){
 				if (transportsConfig[i].name && transportsConfig[i].type && transportsConfig[i].parameter){
-					transports.push({name: transportsConfig[i].name, type: transportsConfig[i].type, parameter: transportsConfig[i].parameter});
+					transports.push({name: transportsConfig[i].name, type: transportsConfig[i].type, parameter: transportsConfig[i].parameter, args: transportsConfig[i].args });
 				}
 			}
 		} else throw new SyntaxError('invalid config file');
@@ -380,6 +380,9 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 		} else {
 			passhash(8, function(pass, hash){
 				controlPass = pass;
+
+				console.log(pass);
+
 				controlHash = hash;
 				saveTorrc(torrcFilePath);
 				torProcess = spawn(torCommand, ['-f', torrcFilePath]);
@@ -531,8 +534,8 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 		}
 		var bridgeLineParts = bridgeLine.split(/ +/);
 		//Checking number of elements in the bridgeLine
-		if (!(bridgeLineParts.length >= 1 && bridgeLineParts.length <= 3)) return false;
-		var transport, address, fingerprint;
+		if (!(bridgeLineParts.length >= 1 && bridgeLineParts.length <= 5)) return false;
+		var transport, address, fingerprint, cert, iat;
 		if (bridgeLineParts.length == 1){
 			address = bridgeLineParts[0];
 			if (!isAddressPart(address)) return false;
@@ -550,11 +553,13 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 			transport = bridgeLineParts[0];
 			address = bridgeLineParts[1];
 			fingerprint = bridgeLineParts[2];
+			cert = bridgeLineParts[3];
+			iat = bridgeLineParts[4];
 
 			if (!isAddressPart(address)) return false;
 			if (!isFingerprintPart(fingerprint)) return false;
 		}
-		return {transport: transport, address: address, fingerprint: (fingerprint ? fingerprint.toLowerCase() : undefined)};
+		return {transport: transport, address: address, fingerprint: (fingerprint ? fingerprint.toLowerCase() : undefined), cert: cert, iat: iat };
 	}
 
 	function isAddressPart(part){
@@ -577,6 +582,9 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 		if (bridgeConfigObj.transport) bridgeLine += bridgeConfigObj.transport + ' ';
 		bridgeLine += bridgeConfigObj.address;
 		if (bridgeConfigObj.fingerprint) bridgeLine += ' ' + bridgeConfigObj.fingerprint;
+                if (bridgeConfigObj.cert) bridgeLine += ' ' + bridgeConfigObj.cert;
+                if (bridgeConfigObj.iat) bridgeLine += ' ' + bridgeConfigObj.iat;
+
 		return bridgeLine;
 	}
 
@@ -633,11 +641,9 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 		var transportName = transportLineParts[0];
 		var transportType = transportLineParts[1];
 		var transportParam = transportLineParts[2];
-		var transportArgs = [];
-		for (var i = 3; i < transportLineParts.length; i++){
-			transportArgs.push(transportLineParts[i]);
-		}
-		if (!(transportType == 'exec' || transportType == 'socks4' || transportType == 'socks5')) return false;
+		var transportArgs = transportLineParts[3];
+
+		if (!(transportType == 'exec' ||  transportType == 'socks4' || transportType == 'socks5')) return false;
 		if (transportType == 'exec'){ //Pluggable transport
 			//Should it be validated??
 			//Just check it's a path, for the least
@@ -650,7 +656,10 @@ module.exports = function(thsFolder, socksPortNumber, controlPortNumber, torErro
 	}
 
 	function getTransportLine(transportConfigObj){
-		return transportConfigObj.name + ' ' + transportConfigObj.type + ' ' + transportConfigObj.parameter + (transportConfigObj.args.length > 0 ? ' ' + transportConfigObj.args.join(' ') : '');
+
+		if(!transportConfigObj.args) transportConfigObj.args = [];
+
+		return transportConfigObj.name + ' ' + transportConfigObj.type + ' ' + transportConfigObj.parameter + ' ' + transportConfigObj.args + '';
 	}
 
 };
